@@ -514,10 +514,6 @@ ifeq ($(cc-name),clang)
 
 # Enable hot cold split optimization
 KBUILD_CFLAGS	+= -mllvm -hot-cold-split=true
-# Enable MLGO optimizations for register allocation
-KBUILD_CFLAGS	+= -mllvm -regalloc-enable-advisor=release
-KBUILD_LDFLAGS	+= -mllvm -regalloc-enable-advisor=release
-KBUILD_LDFLAGS	+= -mllvm -enable-ml-inliner=release
 
 ifneq ($(CROSS_COMPILE),)
 CLANG_FLAGS	+= --target=$(notdir $(CROSS_COMPILE:%-=%))
@@ -733,11 +729,6 @@ KBUILD_AFLAGS += -march=armv8.2-a+crypto+crc+dotprod+fp16fml+lse+rcpc
 ifdef CONFIG_CC_IS_CLANG
 KBUILD_CFLAGS	+= -mllvm -inline-threshold=600
 KBUILD_CFLAGS	+= -mllvm -inlinehint-threshold=750
-
-# We limit inlining to 5KB on the stack.
-KBUILD_CFLAGS	+= --param large-stack-frame=12288
-KBUILD_CFLAGS	+= --param inline-min-speedup=5
-KBUILD_CFLAGS	+= --param inline-unit-growth=60
 endif
 
 ifdef CONFIG_CC_WERROR
