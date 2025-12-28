@@ -152,8 +152,8 @@
  * The PULSE value is added to metrics when they grow and the DECAY_SHIFT value
  * is used for decreasing metrics on a regular basis.
  */
-#define PULSE		1024
-#define DECAY_SHIFT	3
+#define PULSE		2048
+#define DECAY_SHIFT	2
 
 /*
  * Number of the most recent idle duration values to take into consideration for
@@ -165,7 +165,7 @@
  * Idle state target residency threshold used for deciding whether or not to
  * check the time till the closest expected timer event.
  */
-#define RESIDENCY_THRESHOLD_US	15
+#define RESIDENCY_THRESHOLD_US	5
 
 /**
  * struct teo_bin - Metrics used by the TEO cpuidle governor.
@@ -398,7 +398,7 @@ static int teo_select(struct cpuidle_driver *drv, struct cpuidle_device *dev)
 	if (!dev->states_usage[0].disable)
 		idx = 0;
 
-	cpu_utilized = false;
+	cpu_utilized = sched_cpu_util(dev->cpu) > cpu_data->util_threshold * 2;
 	/*
 	 * If the CPU is being utilized over the threshold and there are only 2
 	 * states to choose from, the metrics need not be considered, so choose
@@ -478,11 +478,11 @@ static int teo_select(struct cpuidle_driver *drv, struct cpuidle_device *dev)
 	 * sum of the intercepts and hits metrics for the candidate state and
 	 * all of the deeper states, or the sum of the numbers of recent
 	 * intercepts over all of the states shallower than the candidate one
-	 * is greater than a half of the number of recent events taken into
+	 * is greater than two thirds of the number of recent events taken into
 	 * account, a shallower idle state is likely to be a better choice.
 	 */
-	alt_intercepts = 2 * idx_intercept_sum > cpu_data->total - idx_hit_sum;
-	alt_recent = idx_recent_sum > NR_RECENT / 2;
+	alt_intercepts = 3 * idx_intercept_sum > cpu_data->total - idx_hit_sum;
+	alt_recent = idx_recent_sum > (NR_RECENT * 2) / 3;
 	if (alt_recent || alt_intercepts) {
 		int first_suitable_idx = idx;
 
@@ -596,7 +596,7 @@ static int teo_select(struct cpuidle_driver *drv, struct cpuidle_device *dev)
 	 * total wakeup events, do not stop the tick.
 	 */
 	if (drv->states[idx].target_residency < TICK_USEC &&
-	    tick_intercept_sum > cpu_data->total / 2 + cpu_data->total / 8)
+	    tick_intercept_sum > (cpu_data->total * 3) / 4)
 		duration_us = TICK_USEC / 2;
 
 end:
