@@ -894,6 +894,13 @@ static struct sched_entity *pick_eevdf(struct cfs_rq *cfs_rq)
 		curr = NULL;
 
 	/*
+	 * Picking the ->next buddy will affect latency but not fairness.
+	 */
+	if (cfs_rq->next && entity_eligible(cfs_rq, cfs_rq->next)) {
+		return cfs_rq->next;
+	}
+
+	/*
 	 * Once selected, run a task until it either becomes non-eligible or
 	 * until it gets a new slice. See the HACK in set_next_entity().
 	 */
@@ -1117,6 +1124,8 @@ static void update_tg_load_avg(struct cfs_rq *cfs_rq, int force)
 {
 }
 #endif /* CONFIG_SMP */
+
+static void set_next_buddy(struct sched_entity *se);
 
 /*
  * Update the current task's runtime statistics.
@@ -5013,13 +5022,6 @@ set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 static struct sched_entity *
 pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 {
-	/*
-	 * Enabling NEXT_BUDDY will affect latency but not fairness.
-	 */
-	if (sched_feat(NEXT_BUDDY) &&
-	    cfs_rq->next && entity_eligible(cfs_rq, cfs_rq->next))
-		return cfs_rq->next;
-
 	return pick_eevdf(cfs_rq);
 }
 
@@ -6118,8 +6120,6 @@ enqueue_throttle:
 	hrtick_update(rq);
 }
 
-static void set_next_buddy(struct sched_entity *se);
-
 /*
  * The dequeue_task method is called before nr_running is
  * decreased. We remove the task from the rbtree and
@@ -6785,11 +6785,77 @@ static void set_next_buddy(struct sched_entity *se)
 	}
 }
 
+enum preempt_wakeup_action {
+	PREEMPT_WAKEUP_NONE,	/* No preemption. */
+	PREEMPT_WAKEUP_SHORT,	/* Ignore slice protection. */
+	PREEMPT_WAKEUP_PICK,	/* Let __pick_eevdf() decide. */
+	PREEMPT_WAKEUP_RESCHED,	/* Force reschedule. */
+};
+
+static inline bool
+set_preempt_buddy(struct cfs_rq *cfs_rq, int wake_flags,
+		  struct sched_entity *pse, struct sched_entity *se)
+{
+	/*
+	 * Keep existing buddy if the deadline is sooner than pse.
+	 * The older buddy may be cache cold and completely unrelated
+	 * to the current wakeup but that is unpredictable where as
+	 * obeying the deadline is more in line with EEVDF objectives.
+	 */
+	if (cfs_rq->next && entity_before(cfs_rq->next, pse))
+		return false;
+
+	set_next_buddy(pse);
+	return true;
+}
+
+/*
+ * WF_SYNC|WF_TTWU indicates the waker expects to sleep but it is not
+ * strictly enforced because the hint is either misunderstood or
+ * multiple tasks must be woken up.
+ */
+static inline enum preempt_wakeup_action
+preempt_sync(struct rq *rq, int wake_flags,
+	     struct sched_entity *pse, struct sched_entity *se)
+{
+	u64 threshold, delta;
+
+	/*
+	 * WF_SYNC without WF_TTWU is not expected so warn if it happens even
+	 * though it is likely harmless.
+	 */
+	WARN_ON_ONCE(!(wake_flags & WF_TTWU));
+
+	threshold = sysctl_sched_migration_cost;
+	delta = rq_clock_task(rq) - se->exec_start;
+	if ((s64)delta < 0)
+		delta = 0;
+
+	/*
+	 * WF_RQ_SELECTED implies the tasks are stacking on a CPU when they
+	 * could run on other CPUs. Reduce the threshold before preemption is
+	 * allowed to an arbitrary lower value as it is more likely (but not
+	 * guaranteed) the waker requires the wakee to finish.
+	 */
+	if (wake_flags & WF_RQ_SELECTED)
+		threshold >>= 2;
+
+	/*
+	 * As WF_SYNC is not strictly obeyed, allow some runtime for batch
+	 * wakeups to be issued.
+	 */
+	if (entity_before(pse, se) && delta >= threshold)
+		return PREEMPT_WAKEUP_RESCHED;
+
+	return PREEMPT_WAKEUP_NONE;
+}
+
 /*
  * Preempt the current task with a newly woken task if needed:
  */
 static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_flags)
 {
+	enum preempt_wakeup_action preempt_action = PREEMPT_WAKEUP_PICK;
 	struct task_struct *curr = rq->curr;
 	struct sched_entity *se = &curr->se, *pse = &p->se;
 	struct cfs_rq *cfs_rq = task_cfs_rq(curr);
@@ -6841,6 +6907,57 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	cfs_rq = cfs_rq_of(se);
 	update_curr(cfs_rq);
 
+	/*
+	 * If @p has a shorter slice than current and @p is eligible, override
+	 * current's slice protection in order to allow preemption.
+	 */
+	if (pse->slice < se->slice) {
+		preempt_action = PREEMPT_WAKEUP_SHORT;
+		goto pick;
+	}
+
+	/*
+	 * Ignore wakee preemption on WF_FORK as it is less likely that
+	 * there is shared data as exec often follow fork.
+	 */
+	if (wake_flags & WF_FORK)
+		return;
+
+	/*
+	 * If @p potentially is completing work required by current then
+	 * consider preemption.
+	 *
+	 * Reschedule if waker is no longer eligible. */
+	if (in_task() && !entity_eligible(cfs_rq, se)) {
+		preempt_action = PREEMPT_WAKEUP_RESCHED;
+		goto preempt;
+	}
+
+	/* Prefer picking wakee soon if appropriate. */
+	if (sched_feat(NEXT_BUDDY) &&
+	    set_preempt_buddy(cfs_rq, wake_flags, pse, se)) {
+
+		/*
+		 * Decide whether to obey WF_SYNC hint for a new buddy. Old
+		 * buddies are ignored as they may not be relevant to the
+		 * waker and less likely to be cache hot.
+		 */
+		if (wake_flags & WF_SYNC)
+			preempt_action = preempt_sync(rq, wake_flags, pse, se);
+	}
+
+	switch (preempt_action) {
+	case PREEMPT_WAKEUP_NONE:
+		return;
+	case PREEMPT_WAKEUP_RESCHED:
+		goto preempt;
+	case PREEMPT_WAKEUP_SHORT:
+	     	/* fallthrough */
+	case PREEMPT_WAKEUP_PICK:
+		break;
+	}
+
+pick:
 	/*
 	 * XXX pick_eevdf(cfs_rq) != se ?
 	 */
