@@ -164,12 +164,6 @@ static int six_hundred_forty_kb = 640 * 1024;
 static int max_kswapd_threads = MAX_KSWAPD_THREADS;
 static int __maybe_unused two_hundred_million = 200000000;
 
-#ifdef CONFIG_PELT_COMPATIBILITY_LAYER
-static unsigned int ns_per_sec = NSEC_PER_SEC;
-static unsigned int __read_mostly sysctl_sched_group_upmigrate_pct = 100;
-static unsigned int __read_mostly sysctl_sched_group_downmigrate_pct = 95;
-#endif /* CONFIG_PELT_COMPATIBILITY_LAYER */
-
 /* this is needed for the proc_doulongvec_minmax of vm_dirty_bytes */
 static unsigned long dirty_bytes_min = 2 * PAGE_SIZE;
 
