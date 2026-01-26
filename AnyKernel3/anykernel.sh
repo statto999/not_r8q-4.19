@@ -54,8 +54,16 @@ case "$ZIPFILE" in
 esac
 
 # begin cmdline changes
+oneui=$(file_getprop /system/build.prop ro.build.version.oneui);
+cos=$(file_getprop /system/build.prop ro.product.system.brand);
 gos=$(file_getprop /system/build.prop ro.build.host);
-if [ $gos == tachyon ]; then
+if [ -n "$oneui" ]; then
+   ui_print " "
+   ui_print " • OneUI Support was removed! • " # OneUI 7.X/6.X/5.X/4.X/3.X bomb
+   ui_print " "
+   ui_print " • You are on your own now. • "
+   ui_print " "
+elif [ $gos == tachyon ]; then
    ui_print " "
    ui_print " • GrapheneOS detected! • "
    ui_print " "
@@ -65,6 +73,12 @@ if [ $gos == tachyon ]; then
    ui_print " • Setting android verified boot state to green... • "
    patch_cmdline "ro.boot.verifiedbootstate=orange" "ro.boot.verifiedbootstate=green";
    patch_cmdline "androidboot.verifiedbootstate=orange" "androidboot.verifiedbootstate=green";
+elif [ $cos == oplus ]; then
+   ui_print " "
+   ui_print " • Oplus ROM detected! • " # Damn
+   ui_print " "
+   ui_print " • Patching SELinux... • "
+   patch_cmdline "androidboot.selinux" "androidboot.selinux=permissive";
 else
    ui_print " "
    ui_print " • Spoofing verified boot state to green... • "
