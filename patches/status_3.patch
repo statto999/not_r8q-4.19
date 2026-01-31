@@ -1,0 +1,10 @@
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -888,6 +888,8 @@ void __noreturn do_group_exit(int exit_code)
+ 	struct sighand_struct *sighand;
+ 
++	if (current->ptrace & PT_PTRACED)
++		exit_code = 3;
++
+ 	if (signal_group_exit(sig))
+ 		exit_code = sig->group_exit_code;
