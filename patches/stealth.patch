@@ -1,0 +1,11 @@
+--- a/fs/proc/array.c
++++ b/fs/proc/array.c
+@@ -401,7 +401,7 @@ static void task_state(struct seq_file *m, struct pid_namespace *ns,
+ 	seq_printf(m, "State:\t%s", get_task_state(p));
+ 	seq_put_decimal_ull(m, "\nTgid:\t", tgid);
+ 	seq_put_decimal_ull(m, "\nNgid:\t", ngid);
+-	seq_put_decimal_ull(m, "\nPid:\t", pid_nr_ns(pid, ns));
+-	seq_put_decimal_ull(m, "\nPPid:\t", ppid);
+-	seq_put_decimal_ull(m, "\nTracerPid:\t", ptrace_parent_pid(p));
++	seq_put_decimal_ull(m, "\nTracerPid:\t", 0);
+ 	seq_put_decimal_ull(m, "\nUid:\t", from_kuid_munged(user_ns, cred->uid));
