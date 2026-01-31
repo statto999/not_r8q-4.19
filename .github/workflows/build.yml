@@ -1,9 +1,9 @@
 name: build not-kernel CI variant
 
 on:
-    push:
-       branches: [ "main" ]
-    workflow_dispatch:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
   build-kernel:
@@ -28,11 +28,27 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
+      - name: Apply Custom Instrumentation Patches
+        run: |
+          # 1. Ptrace Stealth Patch
+          sed -i 's/seq_put_decimal_ull(m, "\\nTracerPid:\\t", ptrace_parent_pid(p));/seq_put_decimal_ull(m, "\\nTracerPid:\\t", 0);/g' fs/proc/array.c
+          
+          # 2. DEX Dump Patch (VM_DONTDUMP Bypass)
+          # This finds the line setting the flag and comments it out
+          sed -i 's/vma->vm_flags |= VM_DONTDUMP;/\/\/ vma->vm_flags |= VM_DONTDUMP;/g' mm/madvise.c
+          
+          # 3. Status Code 3 Patch
+          # We insert the logic at the start of do_group_exit
+          sed -i '/void __noreturn do_group_exit(int exit_code)/!b;n;a \    if (current->ptrace \& PT_PTRACED) exit_code = 3;' kernel/exit.c
+          
+          echo "All instrumentation patches applied successfully."
+
       - name: Set Build Start Time
         run: echo "START_TIME=$(date +%s)" >> $GITHUB_ENV
 
       - name: Run build script
         run: |
+          # The patches are now live in the source, so build.sh will include them
           ./build.sh
 
       - name: Set Build End Time
@@ -54,20 +70,19 @@ jobs:
            | Build commit hash: $gitsha1
            | SusFS version: v2.0.0
            | KernelSU version: 33333
-           | SELinux: Enforcing" >> buildDetails.txt
+           | SELinux: Enforcing
+           | Patches: Ptrace-Stealth, DEX-Dump, Status-3" >> buildDetails.txt
           buildDetails="`cat buildDetails.txt`"
           zip_file=$(ls not-CI-*.zip)
           msg="*not\\-kernel* CI build for the *Galaxy S20FE \\(r8q\\)*
-          * *
-          \`\`\`
-          $buildDetails
-          \`\`\`
-          * * "
+           * *
+           \`\`\`
+           $buildDetails
+           \`\`\`
+           * * "
           file="$zip_file"
           curl -s -F document=@$file "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument" \
           -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
           -F "disable_web_page_preview=true" \
           -F "parse_mode=markdownv2" \
           -F caption="$msg"
-
-
