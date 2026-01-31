@@ -1,0 +1,8 @@
+--- a/mm/madvise.c
++++ b/mm/madvise.c
+@@ -448,7 +448,6 @@ static int madvise_dontdump(struct vm_area_struct *vma, struct vm_area_struct **p
+ 	if (vma->vm_flags & VM_IO)
+ 		return -EINVAL;
+-	vma->vm_flags |= VM_DONTDUMP;
+ 	return 0;
+ }
