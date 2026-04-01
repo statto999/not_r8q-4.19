@@ -50,6 +50,3 @@ jobs:
         with:
           name: Patched-Kernel-r8q
           path: not-CI-*.zip
-          -F "disable_web_page_preview=true" \
-          -F "parse_mode=markdownv2" \
-          -F caption="$msg"
